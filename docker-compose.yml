@@ -1,0 +1,149 @@
+version: '3.8'
+
+services:
+  pjn-app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./expedientes:/app/expedientes
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./storage_state.json:/app/storage_state.json:ro
+    environment:
+      - WEB_DASHBOARD_ENABLED=true
+      - BACKUP_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=300
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "pjn", "health", "--quick"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - vector-db
+    
+  pjn-scheduler:
+    build: .
+    volumes:
+      - ./expedientes:/app/expedientes
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./storage_state.json:/app/storage_state.json:ro
+    environment:
+      - SCHEDULER_ENABLED=true
+    env_file:
+      - .env
+    command: ["python", "-m", "pjn", "schedule"]
+    restart: unless-stopped
+    depends_on:
+      - pjn-app
+      - vector-db
+    
+  vector-db:
+    image: qdrant/qdrant:v1.7.4
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Opcional: Base de datos PostgreSQL para casos de alto volumen
+  postgres-db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/sql:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_DB=pjn_system
+      - POSTGRES_USER=pjn_user
+      - POSTGRES_PASSWORD=secure_password_change_me
+    restart: unless-stopped
+    profiles:
+      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pjn_user -d pjn_system"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Opcional: Redis para cache y cola de tareas
+  redis-cache:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    profiles:
+      - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Opcional: Prometheus para métricas avanzadas
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Opcional: Grafana para dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin_password_change_me
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    depends_on:
+      - prometheus
+
+volumes:
+  qdrant_data:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  default:
+    name: pjn-network
