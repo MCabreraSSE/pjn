@@ -46,7 +46,7 @@
 ```
 📁 PJN-System/
 ├── 📁 expedientes/
-│   ├── 📁 hernandez_matias_c_banco_santander_rio_sa_s_ordinario_com_016561_2024/
+│   ├── 📁 xxxxxxxxx/
 │   │   ├── 📄 2025-08-25__cedula_electronica_tribunal__250000.pdf
 │   │   ├── 📄 2025-08-22__cedula_electronica_parte__250001.pdf
 │   │   └── 📄 metadata.json
